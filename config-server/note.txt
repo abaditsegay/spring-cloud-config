@@ -1,0 +1,256 @@
+## Handling Security Encryption in Spring Cloud Server Configuration
+
+### 1. Using Spring Cloud Config Server with Encryption
+
+Spring Cloud Config Server supports encrypting and decrypting property values using Spring Boot Encryption and Decryption mechanisms.
+
+#### Step 1: Add Required Dependencies
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-config</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.security</groupId>
+    <artifactId>spring-security-rsa</artifactId>
+</dependency>
+```
+
+#### Step 2: Generate Encryption Key
+
+```bash
+encrypt.key=my-secret-key
+```
+
+Or use an RSA key pair:
+
+```bash
+keytool -genkeypair -alias my-key -keyalg RSA -dname "CN=example.com, OU=IT, O=MyCompany, L=City, S=State, C=US" -keypass mypass -keystore mykeystore.jks -storepass mystorepass
+```
+
+#### Step 3: Configure Encryption in `application.properties`
+
+```properties
+encrypt.key=my-secret-key
+```
+
+#### Step 4: Encrypt Property Values
+
+```bash
+curl -X POST --data mypassword http://localhost:8888/encrypt
+```
+
+Use this encrypted value in `application.yml`:
+
+```yaml
+datasource:
+  password: "{cipher}b7B5JjsR1I8U4wX..."
+```
+
+---
+
+### 2. Use HashiCorp Vault for Secure Secrets Management
+
+#### Step 1: Add Dependencies
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-vault-config</artifactId>
+</dependency>
+```
+
+#### Step 2: Configure Vault in `bootstrap.yml`
+
+```yaml
+spring:
+  cloud:
+    vault:
+      uri: http://localhost:8200
+      authentication: TOKEN
+      token: my-root-token
+      kv:
+        enabled: true
+```
+
+#### Step 3: Store and Retrieve Secrets in Vault
+
+```bash
+vault kv put secret/myapp datasource.password=mypassword
+```
+
+Use in `application.yml`:
+
+```yaml
+datasource:
+  password: "${vault.secret/myapp/datasource.password}"
+```
+
+---
+
+### 3. Secure Communication with TLS/SSL
+
+```properties
+server.ssl.key-store=classpath:keystore.p12
+server.ssl.key-store-password=mystorepass
+server.ssl.key-store-type=PKCS12
+server.ssl.key-alias=my-key
+```
+
+---
+
+### 4. Use Environment Variables and Kubernetes Secrets
+
+```bash
+export DB_PASSWORD=mypassword
+```
+
+```yaml
+datasource:
+  password: ${DB_PASSWORD}
+```
+
+#### Using Kubernetes Secrets
+
+```bash
+kubectl create secret generic db-secret --from-literal=password=mypassword
+```
+
+```yaml
+env:
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: db-secret
+        key: password
+```
+
+---
+
+### 5. Steps to Read and Export Properties in Spring Cloud Config Server
+
+#### Step 1: Set Up Spring Cloud Config Server
+
+##### Dependencies
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-config-server</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+```
+
+##### Enable Config Server
+
+```java
+@SpringBootApplication
+@EnableConfigServer
+public class ConfigServerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(ConfigServerApplication.class, args);
+    }
+}
+```
+
+##### Configure `application.yml`
+
+```yaml
+server:
+  port: 8888
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/example/config-repo
+          search-paths: config
+```
+
+---
+
+### 6. Create a Service to Read and Export Properties
+
+```java
+@Service
+public class ConfigPropertiesExporter {
+    @Autowired
+    private ConfigurableEnvironment environment;
+
+    public void exportPropertiesToFile(String filePath) {
+        Properties properties = new Properties();
+
+        for (PropertySource<?> propertySource : environment.getPropertySources()) {
+            if (propertySource instanceof ResourcePropertySource resourcePropertySource) {
+                properties.putAll(resourcePropertySource.getSource());
+            }
+        }
+
+        try (FileWriter writer = new FileWriter(filePath)) {
+            properties.store(writer, "Exported Config Properties");
+            System.out.println("Config properties exported to: " + filePath);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+---
+
+### 7. Expose an API to Download Config as a File
+
+```java
+@RestController
+@RequestMapping("/config")
+public class ConfigExportController {
+
+    @Autowired
+    private ConfigurableEnvironment environment;
+
+    @GetMapping("/export")
+    public Map<String, Object> exportConfig() {
+        Map<String, Object> properties = new HashMap<>();
+
+        for (PropertySource<?> propertySource : environment.getPropertySources()) {
+            if (propertySource.getSource() instanceof Map<?, ?> sourceMap) {
+                properties.putAll((Map<String, Object>) sourceMap);
+            }
+        }
+
+        return properties;
+    }
+}
+```
+
+---
+
+### 8. Sample Output File (`config-exported.properties`)
+
+```properties
+# Exported Config Properties
+server.port=8888
+spring.application.name=config-server
+spring.cloud.config.server.git.uri=https://github.com/example/config-repo
+spring.datasource.url=jdbc:mysql://localhost:3306/mydb
+spring.datasource.username=root
+spring.datasource.password=secret
+```
+
+---
+
+### 9. Best Practices
+
+✅ **Exclude Sensitive Data**: Do not store passwords in plain text. Use HashiCorp Vault or encryption.\
+✅ **Use JSON/YAML for APIs**: Convert properties into a structured format for easy consumption.\
+✅ **Secure Config Server**: Protect endpoints with authentication (`spring.security`).\
+✅ **Use Kubernetes Secrets**: If deployed on Kubernetes, store configurations securely in `ConfigMaps` or `Secrets`.
+
+
+
+
+
